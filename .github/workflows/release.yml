@@ -1,0 +1,32 @@
+name: release
+
+# Publishes this extension to the Zed registry. The navigator monorepo's
+# deploy.yml syncs the extension source here and pushes a `v<semver>` tag each
+# release; that tag fires this workflow, which opens (or updates) the version-bump
+# PR against the zed-industries/extensions registry via the community action.
+#
+# Requirements (one-time):
+#   - A fork of zed-industries/extensions at neon-law-foundation/extensions (public).
+#   - A COMMITTER_TOKEN secret: a PAT with `repo` + `workflow` scope that can push
+#     to that fork and open the PR.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: publish to Zed registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: open version-bump PR to zed-industries/extensions
+        uses: huacnlee/zed-extension-action@v2
+        with:
+          extension-name: navigator-lsp
+          push-to: neon-law-foundation/extensions
+        env:
+          COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}

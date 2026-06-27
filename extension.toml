@@ -1,0 +1,11 @@
+id = "navigator-lsp"
+name = "Neon Law Navigator LSP"
+description = "Markdown diagnostics and source.fixAll for every Markdown file, with the stricter notation-template superset layered on top — powered by navigator-lsp."
+version = "0.2.0"
+schema_version = 1
+authors = ["NeonLaw"]
+repository = "https://github.com/neon-law-foundation/navigator"
+
+[language_servers.navigator-lsp]
+name = "Neon Law Navigator LSP"
+languages = ["Markdown"]
