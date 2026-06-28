@@ -36,33 +36,20 @@ impl NavigatorLsp {
     /// Resolve the server binary, downloading the matching Release asset when
     /// it isn't already present.
     fn download_binary(&mut self, language_server_id: &LanguageServerId) -> Result<String> {
-        // The platform → Release-asset mapping. Today the Release ships one
-        // arch per OS (Apple Silicon macOS, x86-64 Linux, x86-64 Windows);
-        // other arches (Intel Mac, ARM Linux) get a clear error until those
-        // cross-builds are attached. `platform_token` matches deploy.yml's
-        // `navigator-lsp-<tag>-<token>.<ext>` asset name.
+        // Apple Silicon macOS is the only platform with a prebuilt binary for
+        // now; everything else gets a clear, actionable error. `macos` matches
+        // deploy.yml's `navigator-lsp-<tag>-macos.tar.gz` asset name.
         let (os, arch) = current_platform();
-        let (platform_token, archive_ext, file_type, binary_leaf) = match (os, arch) {
-            (Os::Mac, Architecture::Aarch64) => {
-                ("macos", "tar.gz", DownloadedFileType::GzipTar, SERVER_NAME)
-            }
-            (Os::Linux, Architecture::X8664) => {
-                ("linux", "tar.gz", DownloadedFileType::GzipTar, SERVER_NAME)
-            }
-            (Os::Windows, Architecture::X8664) => (
-                "windows",
-                "zip",
-                DownloadedFileType::Zip,
-                "navigator-lsp.exe",
-            ),
+        match (os, arch) {
+            (Os::Mac, Architecture::Aarch64) => {}
             _ => {
                 return Err(format!(
-                    "navigator-lsp has no prebuilt binary for this platform yet ({os:?}/{arch:?}). \
-                     Install it on your $PATH (`cargo install --path lsp`) or set \
-                     lsp.navigator-lsp.binary.path in your Zed settings."
+                    "navigator-lsp ships a prebuilt binary only for Apple Silicon macOS right now \
+                     (got {os:?}/{arch:?}). Install it on your $PATH (`cargo install --path lsp`) \
+                     or set lsp.navigator-lsp.binary.path in your Zed settings."
                 ));
             }
-        };
+        }
 
         set_language_server_installation_status(language_server_id, &Status::CheckingForUpdate);
         let release = latest_github_release(
@@ -73,12 +60,9 @@ impl NavigatorLsp {
             },
         )?;
 
-        let asset_name = format!(
-            "navigator-lsp-{}-{platform_token}.{archive_ext}",
-            release.version
-        );
+        let asset_name = format!("navigator-lsp-{}-macos.tar.gz", release.version);
         let version_dir = format!("navigator-lsp-{}", release.version);
-        let binary_path = format!("{version_dir}/{binary_leaf}");
+        let binary_path = format!("{version_dir}/{SERVER_NAME}");
 
         // Already downloaded for this release — reuse it, so a re-resolve after
         // a Zed restart doesn't re-fetch.
@@ -95,10 +79,14 @@ impl NavigatorLsp {
             .ok_or_else(|| format!("no `{asset_name}` asset on the {} release", release.version))?;
 
         set_language_server_installation_status(language_server_id, &Status::Downloading);
-        // The archive holds a single `navigator-lsp[.exe]`; extract it into the
+        // The tarball holds a single `navigator-lsp`; extract it into the
         // per-version directory, then mark it runnable.
-        download_file(&asset.download_url, &version_dir, file_type)
-            .map_err(|err| format!("failed to download {asset_name}: {err}"))?;
+        download_file(
+            &asset.download_url,
+            &version_dir,
+            DownloadedFileType::GzipTar,
+        )
+        .map_err(|err| format!("failed to download {asset_name}: {err}"))?;
         make_file_executable(&binary_path)
             .map_err(|err| format!("failed to make {binary_path} executable: {err}"))?;
 
@@ -147,7 +135,14 @@ impl zed::Extension for NavigatorLsp {
             // A `navigator-lsp` already on PATH (contributors, `cargo install`)
             // wins over a download — no network, and it tracks their checkout.
             path
-        } else if let Some(path) = self.cached_binary_path.clone() {
+        } else if let Some(path) = self
+            .cached_binary_path
+            .clone()
+            .filter(|path| std::fs::metadata(path).is_ok_and(|stat| stat.is_file()))
+        {
+            // Re-check the cached path is still on disk: if it was pruned or the
+            // cache cleared mid-session, fall through to a fresh download rather
+            // than handing Zed a stale path that fails to spawn until restart.
             path
         } else {
             self.download_binary(language_server_id)?
